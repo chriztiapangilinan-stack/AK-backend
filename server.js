@@ -38,7 +38,36 @@ app.use(bodyParser.json({ limit: "1mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // =====================================================
-// 2. DATABASE CONNECTION
+// 2. COMPREHENSIVE ACTIVITY & REQUEST LOGGER (TOP)
+// =====================================================
+app.use((req, res, next) => {
+    const startedAt = Date.now();
+
+    console.log("\n--------------------------------------------------");
+    console.log(`[INCOMING] ${req.method} ${req.originalUrl}`);
+    console.log(`[IP] ${req.ip || req.socket.remoteAddress}`);
+    
+    if (Object.keys(req.query || {}).length > 0) {
+        console.log(`[QUERY PARAMS]`, JSON.stringify(req.query, null, 2));
+    }
+    
+    if (req.body && Object.keys(req.body).length > 0) {
+        const safeBody = { ...req.body };
+        if (safeBody.password) safeBody.password = "[MASKED]";
+        console.log(`[BODY PAYLOAD]`, JSON.stringify(safeBody, null, 2));
+    }
+
+    res.on("finish", () => {
+        const duration = Date.now() - startedAt;
+        console.log(`[RESPONSE] ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms`);
+        console.log("--------------------------------------------------");
+    });
+
+    next();
+});
+
+// =====================================================
+// 3. DATABASE CONNECTION
 // =====================================================
 
 const dbPath = path.join(__dirname, "database.db");
@@ -50,7 +79,7 @@ db.pragma("journal_mode = WAL");
 console.log(`[DATABASE] Connected to ${dbPath}`);
 
 // =====================================================
-// 3. PERSISTENT SQLITE SESSION STORE
+// 4. PERSISTENT SQLITE SESSION STORE
 // =====================================================
 
 const sessionDbPath = path.join(__dirname, "sessions.sqlite");
@@ -158,11 +187,11 @@ app.use(session({
     }
 }));
 
-// Serve static assets
+// Serve static assets (now tracked by the logger above)
 app.use(express.static(__dirname));
 
 // =====================================================
-// 4. CREATE DATABASE TABLES
+// 5. CREATE DATABASE TABLES
 // =====================================================
 
 db.exec(`
@@ -220,7 +249,7 @@ db.exec(`
 `);
 
 // =====================================================
-// 5. DATABASE MIGRATIONS
+// 6. DATABASE MIGRATIONS
 // =====================================================
 
 function addColumnIfMissing(tableName, columnName, columnDefinition) {
@@ -253,7 +282,7 @@ addColumnIfMissing("orders", "status", "TEXT DEFAULT 'Pending'");
 addColumnIfMissing("orders", "created_at", "TEXT");
 
 // =====================================================
-// 6. SEED PRODUCTS IF THE PRODUCTS TABLE IS EMPTY
+// 7. SEED PRODUCTS IF THE PRODUCTS TABLE IS EMPTY
 // =====================================================
 
 const productCount = db.prepare("SELECT COUNT(*) AS count FROM products").get().count;
@@ -286,7 +315,7 @@ if (productCount === 0) {
 }
 
 // =====================================================
-// 7. SEED A DEFAULT PROFILE IF USERS TABLE IS EMPTY
+// 8. SEED A DEFAULT PROFILE IF USERS TABLE IS EMPTY
 // =====================================================
 
 const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
@@ -309,7 +338,7 @@ if (userCount === 0) {
 }
 
 // =====================================================
-// 8. HELPER FUNCTIONS
+// 9. HELPER FUNCTIONS
 // =====================================================
 
 function getAuthenticatedUser(req) {
@@ -379,36 +408,32 @@ function requireLogin(req, res, next) {
 }
 
 // =====================================================
-// ENHANCED REQUEST & ACTIVITY LOGGER MIDDLEWARE
+// 10. FRONTEND WEBSITE ACTIVITY LISTENER ENDPOINT
 // =====================================================
-app.use((req, res, next) => {
-    const startedAt = Date.now();
+app.post("/api/activity", (req, res) => {
+    try {
+        const { action, details, page } = req.body;
+        const user = getAuthenticatedUser(req);
+        const userInfo = user ? `User: ${user.username} (ID: ${user.id})` : "Guest User";
 
-    console.log("\n--------------------------------------------------");
-    console.log(`[INCOMING] ${req.method} ${req.originalUrl}`);
-    console.log(`[IP] ${req.ip || req.socket.remoteAddress}`);
-    
-    if (Object.keys(req.query || {}).length > 0) {
-        console.log(`[QUERY PARAMS]`, JSON.stringify(req.query, null, 2));
-    }
-    
-    if (req.body && Object.keys(req.body).length > 0) {
-        const safeBody = { ...req.body };
-        if (safeBody.password) safeBody.password = "[MASKED]";
-        console.log(`[BODY PAYLOAD]`, JSON.stringify(safeBody, null, 2));
-    }
-
-    res.on("finish", () => {
-        const duration = Date.now() - startedAt;
-        console.log(`[RESPONSE] ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms`);
+        console.log("\n⚡ [WEBSITE ACTIVITY TRACKER]");
+        console.log(`   Page   : ${page || "Unknown Page"}`);
+        console.log(`   Actor  : ${userInfo}`);
+        console.log(`   Action : ${action || "Performed action"}`);
+        if (details) {
+            console.log(`   Details:`, JSON.stringify(details, null, 2));
+        }
         console.log("--------------------------------------------------");
-    });
 
-    next();
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("[ACTIVITY LOG ERROR]", error);
+        return res.status(500).json({ success: false });
+    }
 });
 
 // =====================================================
-// 9. API HOME
+// 11. API HOME
 // =====================================================
 
 app.get("/api", (req, res) => {
@@ -427,13 +452,14 @@ app.get("/api", (req, res) => {
             "GET /api/wishlist",
             "GET /api/wishlist/count",
             "POST /api/wishlist",
-            "DELETE /api/wishlist/:product_id"
+            "DELETE /api/wishlist/:product_id",
+            "POST /api/activity"
         ]
     });
 });
 
 // =====================================================
-// 10. GET PRODUCTS, SEARCH, AND PRICE FILTERS
+// 12. GET PRODUCTS, SEARCH, AND PRICE FILTERS
 // =====================================================
 
 app.get("/api/products", (req, res) => {
@@ -479,7 +505,7 @@ app.get("/api/products", (req, res) => {
 });
 
 // =====================================================
-// 11. REGISTER ACCOUNT
+// 13. REGISTER ACCOUNT
 // =====================================================
 
 app.post("/api/register", async (req, res) => {
@@ -599,7 +625,7 @@ app.post("/api/register", async (req, res) => {
 });
 
 // =====================================================
-// 12. LOGIN
+// 14. LOGIN
 // =====================================================
 
 app.post("/api/login", async (req, res) => {
@@ -683,7 +709,7 @@ app.post("/api/login", async (req, res) => {
 });
 
 // =====================================================
-// 13. LOGOUT
+// 15. LOGOUT
 // =====================================================
 
 app.post("/api/logout", (req, res) => {
@@ -714,7 +740,7 @@ app.post("/api/logout", (req, res) => {
 });
 
 // =====================================================
-// 14. GET LOGGED-IN USER PROFILE
+// 16. GET LOGGED-IN USER PROFILE
 // =====================================================
 
 app.get("/api/profile", (req, res) => {
@@ -746,7 +772,7 @@ app.get("/api/profile", (req, res) => {
 });
 
 // =====================================================
-// 15. UPDATE LOGGED-IN USER PROFILE
+// 17. UPDATE LOGGED-IN USER PROFILE
 // =====================================================
 
 app.put("/api/profile", requireLogin, (req, res) => {
@@ -822,7 +848,7 @@ app.put("/api/profile", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 16. SUBMIT CONTACT MESSAGE
+// 18. SUBMIT CONTACT MESSAGE
 // =====================================================
 
 app.post("/api/contact", (req, res) => {
@@ -866,7 +892,7 @@ app.post("/api/contact", (req, res) => {
 });
 
 // =====================================================
-// 17. CREATE ORDER
+// 19. CREATE ORDER
 // =====================================================
 
 app.post("/api/orders", (req, res) => {
@@ -940,7 +966,7 @@ app.post("/api/orders", (req, res) => {
 });
 
 // =====================================================
-// 18. GET LOGGED-IN USER'S WISHLIST COUNT
+// 20. GET LOGGED-IN USER'S WISHLIST COUNT
 // =====================================================
 
 app.get("/api/wishlist/count", requireLogin, (req, res) => {
@@ -964,7 +990,7 @@ app.get("/api/wishlist/count", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 19. GET LOGGED-IN USER'S WISHLIST
+// 21. GET LOGGED-IN USER'S WISHLIST
 // =====================================================
 
 app.get("/api/wishlist", requireLogin, (req, res) => {
@@ -995,7 +1021,7 @@ app.get("/api/wishlist", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 20. ADD PRODUCT TO LOGGED-IN USER'S WISHLIST
+// 22. ADD PRODUCT TO LOGGED-IN USER'S WISHLIST
 // =====================================================
 
 app.post("/api/wishlist", requireLogin, (req, res) => {
@@ -1048,7 +1074,7 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 21. REMOVE PRODUCT FROM LOGGED-IN USER'S WISHLIST
+// 23. REMOVE PRODUCT FROM LOGGED-IN USER'S WISHLIST
 // =====================================================
 
 app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
@@ -1089,7 +1115,7 @@ app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 22. API 404 HANDLER
+// 24. API 404 HANDLER
 // =====================================================
 
 app.use("/api", (req, res) => {
@@ -1101,7 +1127,7 @@ app.use("/api", (req, res) => {
 });
 
 // =====================================================
-// 23. SERVER ERROR HANDLER
+// 25. SERVER ERROR HANDLER
 // =====================================================
 
 app.use((error, req, res, next) => {
@@ -1123,7 +1149,7 @@ app.use((error, req, res, next) => {
 });
 
 // =====================================================
-// 24. START SERVER
+// 26. START SERVER
 // =====================================================
 
 const server = app.listen(PORT, () => {
@@ -1150,7 +1176,7 @@ server.on("error", (error) => {
 });
 
 // =====================================================
-// 25. GRACEFULLY SHUT DOWN THE SERVER
+// 27. GRACEFULLY SHUT DOWN THE SERVER
 // =====================================================
 
 let isShuttingDown = false;
