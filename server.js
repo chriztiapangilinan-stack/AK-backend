@@ -20,7 +20,7 @@ const allowedOrigins = [
     "http://127.0.0.1:5500",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://regal-pavlova-823257.netlify.app" // <-- Live Netlify frontend URL[cite: 1, 7]
+    "https://regal-pavlova-823257.netlify.app"
 ];
 
 app.use(cors({
@@ -165,8 +165,8 @@ app.use(session({
     rolling: true,
     cookie: {
         httpOnly: true,
-        secure: true,   // Required for HTTPS cross-site requests (Netlify -> Render)[cite: 1, 7]
-        sameSite: "none", // Required for cross-site cookies[cite: 1, 7]
+        secure: true,
+        sameSite: "none",
         maxAge: 7 * 24 * 60 * 60 * 1000
     }
 }));
@@ -411,7 +411,6 @@ app.use((req, res, next) => {
     }
 
     if (req.body && Object.keys(req.body).length > 0) {
-        // Safe logging: hide password values for security
         const sanitizedBody = { ...req.body };
         if (sanitizedBody.password) sanitizedBody.password = "********";
         console.log(`[REQUEST BODY]`, JSON.stringify(sanitizedBody));
