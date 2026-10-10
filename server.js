@@ -187,7 +187,7 @@ app.use(session({
     }
 }));
 
-// Serve static assets (now tracked by the logger above)
+// Serve static assets
 app.use(express.static(__dirname));
 
 // =====================================================
@@ -485,10 +485,7 @@ app.get("/api/products", (req, res) => {
 
         sql += " ORDER BY id DESC";
 
-        console.log(`[DATABASE QUERY] Executing SQL: ${sql} with params:`, params);
         const products = db.prepare(sql).all(...params);
-
-        console.log(`[PRODUCTS] Retrieved ${products.length} product(s).`);
 
         return res.json({
             success: true,
@@ -597,7 +594,17 @@ app.post("/api/register", async (req, res) => {
                     FROM users WHERE id = ?
                 `).get(newUserId);
 
-                console.log(`[AUTH] Account registered and logged in: ${username} (User ID: ${newUserId})`);
+                // =========================================
+                // TERMINAL ACTIVITY LOG: USER REGISTERED & LOGGED IN
+                // =========================================
+                console.log("\n==================================================");
+                console.log("🚀 [USER ACTIVITY] NEW ACCOUNT REGISTERED & LOGGED IN");
+                console.log(`   Username : ${username}`);
+                console.log(`   Full Name: ${fullname}`);
+                console.log(`   Email    : ${email}`);
+                console.log(`   User ID  : ${newUserId}`);
+                console.log(`   Timestamp: ${new Date().toISOString()}`);
+                console.log("==================================================");
 
                 return res.status(201).json({
                     success: true,
@@ -689,7 +696,16 @@ app.post("/api/login", async (req, res) => {
                     FROM users WHERE id = ?
                 `).get(user.id);
 
-                console.log(`[AUTH] Login successful: ${user.username} (User ID: ${user.id})`);
+                // =========================================
+                // TERMINAL ACTIVITY LOG: USER LOGIN
+                // =========================================
+                console.log("\n==================================================");
+                console.log("🔐 [USER ACTIVITY] USER LOGGED IN");
+                console.log(`   Username : ${user.username}`);
+                console.log(`   Email    : ${user.email}`);
+                console.log(`   User ID  : ${user.id}`);
+                console.log(`   Timestamp: ${new Date().toISOString()}`);
+                console.log("==================================================");
 
                 return res.json({
                     success: true,
@@ -755,7 +771,6 @@ app.get("/api/profile", (req, res) => {
         }
 
         const stats = getProfileStats(user);
-        console.log(`[PROFILE] Retrieved profile for ${user.username}`);
 
         return res.json({
             success: true,
@@ -830,8 +845,6 @@ app.put("/api/profile", requireLogin, (req, res) => {
             FROM users WHERE id = ?
         `).get(req.authenticatedUser.id);
 
-        console.log(`[PROFILE] Updated profile for ${updatedUser.username}`);
-
         return res.json({
             success: true,
             message: "Profile updated successfully.",
@@ -875,7 +888,16 @@ app.post("/api/contact", (req, res) => {
             INSERT INTO contacts (name, email, message) VALUES (?, ?, ?)
         `).run(name, email, message);
 
-        console.log(`[CONTACT] New message received from ${email}`);
+        // =========================================
+        // TERMINAL ACTIVITY LOG: CONTACT SUBMISSION
+        // =========================================
+        console.log("\n==================================================");
+        console.log("💬 [USER ACTIVITY] NEW CONTACT MESSAGE SUBMITTED");
+        console.log(`   Name     : ${name}`);
+        console.log(`   Email    : ${email}`);
+        console.log(`   Message  : ${message}`);
+        console.log(`   Timestamp: ${new Date().toISOString()}`);
+        console.log("==================================================");
 
         return res.status(201).json({
             success: true,
@@ -892,7 +914,7 @@ app.post("/api/contact", (req, res) => {
 });
 
 // =====================================================
-// 19. CREATE ORDER
+// 19. CREATE ORDER (CHECKOUT)
 // =====================================================
 
 app.post("/api/orders", (req, res) => {
@@ -942,7 +964,18 @@ app.post("/api/orders", (req, res) => {
             totalAmount, "Pending"
         );
 
-        console.log(`[ORDER] Created ${orderNumber} for ${email} | Total: ${totalAmount}`);
+        // =========================================
+        // TERMINAL ACTIVITY LOG: CHECKOUT / ORDER PLACED
+        // =========================================
+        console.log("\n==================================================");
+        console.log("🛍️ [USER ACTIVITY] CHECKOUT / ORDER PLACED");
+        console.log(`   Order No : ${orderNumber}`);
+        console.log(`   Customer : ${fullname} (${email})`);
+        console.log(`   Phone    : ${phone}`);
+        console.log(`   Payment  : ${paymentMethod || "Not specified"}`);
+        console.log(`   Total    : ₱${totalAmount.toFixed(2)}`);
+        console.log(`   Timestamp: ${new Date().toISOString()}`);
+        console.log("==================================================");
 
         return res.status(201).json({
             success: true,
@@ -1003,8 +1036,6 @@ app.get("/api/wishlist", requireLogin, (req, res) => {
             ORDER BY w.id DESC
         `).all(req.authenticatedUser.id);
 
-        console.log(`[WISHLIST] Retrieved ${products.length} item(s) for ${req.authenticatedUser.username}`);
-
         return res.json({
             success: true,
             count: products.length,
@@ -1021,7 +1052,7 @@ app.get("/api/wishlist", requireLogin, (req, res) => {
 });
 
 // =====================================================
-// 22. ADD PRODUCT TO LOGGED-IN USER'S WISHLIST
+// 22. ADD PRODUCT TO LOGGED-IN USER'S WISHLIST / CART
 // =====================================================
 
 app.post("/api/wishlist", requireLogin, (req, res) => {
@@ -1035,7 +1066,7 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
             });
         }
 
-        const product = db.prepare("SELECT id FROM products WHERE id = ?").get(productId);
+        const product = db.prepare("SELECT * FROM products WHERE id = ?").get(productId);
         if (!product) {
             return res.status(404).json({
                 success: false,
@@ -1058,7 +1089,16 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
             INSERT INTO wishlist (user_id, product_id) VALUES (?, ?)
         `).run(req.authenticatedUser.id, productId);
 
-        console.log(`[WISHLIST] Product ${productId} added for ${req.authenticatedUser.username}`);
+        // =========================================
+        // TERMINAL ACTIVITY LOG: ADD TO CART / WISHLIST
+        // =========================================
+        console.log("\n==================================================");
+        console.log("🛒 [USER ACTIVITY] ITEM ADDED TO CART/WISHLIST");
+        console.log(`   User     : ${req.authenticatedUser.username} (ID: ${req.authenticatedUser.id})`);
+        console.log(`   Product  : ${product.name} (ID: ${product.id})`);
+        console.log(`   Price    : ₱${product.price}`);
+        console.log(`   Timestamp: ${new Date().toISOString()}`);
+        console.log("==================================================");
 
         return res.status(201).json({
             success: true,
@@ -1098,8 +1138,6 @@ app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
                 message: "Product was not found in your wishlist."
             });
         }
-
-        console.log(`[WISHLIST] Product ${productId} removed for ${req.authenticatedUser.username}`);
 
         return res.json({
             success: true,
