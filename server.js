@@ -20,15 +20,16 @@ const allowedOrigins = [
     "http://127.0.0.1:5500",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://akcraft.netlify.app"
+    "https://regal-pavlova-823257.netlify.app" // <-- Live Netlify frontend URL[cite: 1, 7]
 ];
 
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin || origin === "null" || allowedOrigins.includes(origin)) {
+            console.log(`[CORS ALLOWED] Origin: ${origin || "Direct/No Origin"}`);
             return callback(null, true);
         }
-        console.log(`[CORS] Blocked origin: ${origin}`);
+        console.log(`[CORS BLOCKED] Unauthorized origin tried to access: ${origin}`);
         return callback(new Error("Origin not allowed by CORS"));
     },
     credentials: true
@@ -47,7 +48,7 @@ const db = new Database(dbPath);
 db.pragma("foreign_keys = ON");
 db.pragma("journal_mode = WAL");
 
-console.log(`[DATABASE] Connected to ${dbPath}`);
+console.log(`[DATABASE CONNECTED] Path: ${dbPath}`);
 
 // =====================================================
 // 3. PERSISTENT SQLITE SESSION STORE
@@ -79,15 +80,21 @@ class BetterSqliteSessionStore extends session.Store {
                 SELECT sess, expired FROM sessions WHERE sid = ?
             `).get(sid);
 
-            if (!row) return callback(null, null);
+            if (!row) {
+                console.log(`[SESSION MISS] SID: ${sid.substring(0, 8)}... not found.`);
+                return callback(null, null);
+            }
 
             if (row.expired <= Date.now()) {
+                console.log(`[SESSION EXPIRED] SID: ${sid.substring(0, 8)}... expired. Deleting.`);
                 this.db.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
                 return callback(null, null);
             }
 
+            console.log(`[SESSION HIT] SID: ${sid.substring(0, 8)}... retrieved.`);
             return callback(null, JSON.parse(row.sess));
         } catch (error) {
+            console.error("[SESSION GET ERROR]", error);
             return callback(error);
         }
     }
@@ -106,10 +113,12 @@ class BetterSqliteSessionStore extends session.Store {
                     expired = excluded.expired
             `).run(sid, JSON.stringify(sess), expires);
 
+            console.log(`[SESSION SAVE] SID: ${sid.substring(0, 8)}... saved/updated successfully.`);
             this.db.prepare("DELETE FROM sessions WHERE expired <= ?").run(Date.now());
 
             if (callback) callback(null);
         } catch (error) {
+            console.error("[SESSION SET ERROR]", error);
             if (callback) return callback(error);
             this.emit("disconnect", error);
         }
@@ -118,8 +127,10 @@ class BetterSqliteSessionStore extends session.Store {
     destroy(sid, callback) {
         try {
             this.db.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
+            console.log(`[SESSION DESTROY] SID: ${sid.substring(0, 8)}... deleted.`);
             if (callback) callback(null);
         } catch (error) {
+            console.error("[SESSION DESTROY ERROR]", error);
             if (callback) callback(error);
         }
     }
@@ -134,8 +145,10 @@ class BetterSqliteSessionStore extends session.Store {
                 UPDATE sessions SET expired = ? WHERE sid = ?
             `).run(expires, sid);
 
+            console.log(`[SESSION TOUCH] SID: ${sid.substring(0, 8)}... expiration extended.`);
             if (callback) callback(null);
         } catch (error) {
+            console.error("[SESSION TOUCH ERROR]", error);
             if (callback) callback(error);
         }
     }
@@ -152,8 +165,8 @@ app.use(session({
     rolling: true,
     cookie: {
         httpOnly: true,
-        secure: true,   // Required for cross-site HTTPS requests (Netlify -> Render)
-        sameSite: "none", // Required for cross-site cookies
+        secure: true,   // Required for HTTPS cross-site requests (Netlify -> Render)[cite: 1, 7]
+        sameSite: "none", // Required for cross-site cookies[cite: 1, 7]
         maxAge: 7 * 24 * 60 * 60 * 1000
     }
 }));
@@ -219,6 +232,8 @@ db.exec(`
     );
 `);
 
+console.log("[DATABASE TABLES] Verified / Created successfully.");
+
 // =====================================================
 // 5. DATABASE MIGRATIONS
 // =====================================================
@@ -228,7 +243,7 @@ function addColumnIfMissing(tableName, columnName, columnDefinition) {
 
     if (!columns.some(column => column.name === columnName)) {
         db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
-        console.log(`[DATABASE] Added missing column ${tableName}.${columnName}`);
+        console.log(`[DATABASE MIGRATION] Added missing column -> ${tableName}.${columnName}`);
     }
 }
 
@@ -259,6 +274,7 @@ addColumnIfMissing("orders", "created_at", "TEXT");
 const productCount = db.prepare("SELECT COUNT(*) AS count FROM products").get().count;
 
 if (productCount === 0) {
+    console.log("[SEEDING] Products table is empty. Inserting default flower products...");
     const insertProduct = db.prepare(`
         INSERT INTO products (name, price, image, description)
         VALUES (?, ?, ?, ?)
@@ -282,7 +298,9 @@ if (productCount === 0) {
     });
 
     insertProducts(seedProducts);
-    console.log("[DATABASE] Initial flower products added.");
+    console.log("[SEEDING COMPLETE] 8 flower products added.");
+} else {
+    console.log(`[PRODUCTS CHECK] Found ${productCount} existing products in database.`);
 }
 
 // =====================================================
@@ -292,6 +310,7 @@ if (productCount === 0) {
 const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
 
 if (userCount === 0) {
+    console.log("[SEEDING] Users table is empty. Creating default test user...");
     db.prepare(`
         INSERT INTO users (fullname, username, email, phone, address, member_since, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -305,11 +324,13 @@ if (userCount === 0) {
         new Date().toISOString()
     );
 
-    console.log("[DATABASE] Default profile created. Register an account to log in.");
+    console.log("[SEEDING COMPLETE] Default user profile created.");
+} else {
+    console.log(`[USERS CHECK] Found ${userCount} existing user record(s) in database.`);
 }
 
 // =====================================================
-// 8. HELPER FUNCTIONS
+// 8. HELPER FUNCTIONS & COMPREHENSIVE ACTIVITY LOGGER
 // =====================================================
 
 function getAuthenticatedUser(req) {
@@ -324,9 +345,7 @@ function getAuthenticatedUser(req) {
 
 function formatUser(user) {
     if (!user) return null;
-
     const createdAt = user.created_at || null;
-
     return {
         id: user.id,
         fullname: user.fullname,
@@ -367,7 +386,7 @@ function requireLogin(req, res, next) {
     const user = getAuthenticatedUser(req);
 
     if (!user) {
-        console.log(`[AUTH] Unauthorized ${req.method} ${req.originalUrl}`);
+        console.log(`[AUTH FAILED] Unauthorized access block on ${req.method} ${req.originalUrl}`);
         return res.status(401).json({
             success: false,
             message: "Please log in to continue."
@@ -378,12 +397,32 @@ function requireLogin(req, res, next) {
     next();
 }
 
-// Request Logger Middleware
+// MAXIMUM ACTIVITY LOGGER MIDDLEWARE (Prints every request, query, body, and status)
 app.use((req, res, next) => {
     const startedAt = Date.now();
+    const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+    console.log(`\n----------------------------------------`);
+    console.log(`[INCOMING REQUEST] ${req.method} ${req.originalUrl}`);
+    console.log(`[CLIENT IP] ${clientIp}`);
+    
+    if (Object.keys(req.query).length > 0) {
+        console.log(`[QUERY PARAMS]`, JSON.stringify(req.query));
+    }
+
+    if (req.body && Object.keys(req.body).length > 0) {
+        // Safe logging: hide password values for security
+        const sanitizedBody = { ...req.body };
+        if (sanitizedBody.password) sanitizedBody.password = "********";
+        console.log(`[REQUEST BODY]`, JSON.stringify(sanitizedBody));
+    }
+
     res.on("finish", () => {
-        console.log(`[REQUEST] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${Date.now() - startedAt}ms`);
+        const duration = Date.now() - startedAt;
+        console.log(`[RESPONSE SENT] Status: ${res.statusCode} | Time: ${duration}ms`);
+        console.log(`----------------------------------------\n`);
     });
+
     next();
 });
 
@@ -392,6 +431,7 @@ app.use((req, res, next) => {
 // =====================================================
 
 app.get("/api", (req, res) => {
+    console.log("[API ROUTE] Home index requested.");
     res.json({
         success: true,
         message: "A&K Crafts API is running.",
@@ -421,6 +461,8 @@ app.get("/api/products", (req, res) => {
         const search = String(req.query.search || "").trim();
         const filter = String(req.query.filter || "").trim();
 
+        console.log(`[PRODUCTS QUERY] Search: "${search}" | Filter: "${filter}"`);
+
         let sql = "SELECT * FROM products WHERE 1 = 1";
         const params = [];
 
@@ -440,8 +482,7 @@ app.get("/api/products", (req, res) => {
         sql += " ORDER BY id DESC";
 
         const products = db.prepare(sql).all(...params);
-
-        console.log(`[PRODUCTS] Retrieved ${products.length} product(s).`);
+        console.log(`[PRODUCTS SUCCESS] Found and returning ${products.length} product(s).`);
 
         return res.json({
             success: true,
@@ -470,7 +511,10 @@ app.post("/api/register", async (req, res) => {
         const address = String(req.body.address || "").trim();
         const password = String(req.body.password || "");
 
+        console.log(`[REGISTER ATTEMPT] Username: ${username} | Email: ${email}`);
+
         if (!fullname || !username || !email || !phone || !address || !password) {
+            console.log("[REGISTER BLOCKED] Missing required fields.");
             return res.status(400).json({
                 success: false,
                 message: "Please complete all registration fields."
@@ -478,6 +522,7 @@ app.post("/api/register", async (req, res) => {
         }
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            console.log(`[REGISTER BLOCKED] Invalid email format: ${email}`);
             return res.status(400).json({
                 success: false,
                 message: "Please enter a valid email address."
@@ -500,6 +545,7 @@ app.post("/api/register", async (req, res) => {
 
         const existingUsername = db.prepare("SELECT id FROM users WHERE LOWER(username) = LOWER(?)").get(username);
         if (existingUsername) {
+            console.log(`[REGISTER CONFLICT] Username already taken: ${username}`);
             return res.status(409).json({
                 success: false,
                 message: "That username is already registered."
@@ -508,6 +554,7 @@ app.post("/api/register", async (req, res) => {
 
         const existingEmail = db.prepare("SELECT id FROM users WHERE LOWER(email) = LOWER(?)").get(email);
         if (existingEmail) {
+            console.log(`[REGISTER CONFLICT] Email already registered: ${email}`);
             return res.status(409).json({
                 success: false,
                 message: "That email address is already registered."
@@ -524,6 +571,7 @@ app.post("/api/register", async (req, res) => {
         `).run(fullname, username, email, phone, address, memberSince, hashedPassword, createdAt);
 
         const newUserId = Number(result.lastInsertRowid);
+        console.log(`[DATABASE INSERT] New user created successfully. User ID: ${newUserId}`);
 
         req.session.regenerate((sessionError) => {
             if (sessionError) {
@@ -550,7 +598,7 @@ app.post("/api/register", async (req, res) => {
                     FROM users WHERE id = ?
                 `).get(newUserId);
 
-                console.log(`[AUTH] Account registered and logged in: ${username} (User ID: ${newUserId})`);
+                console.log(`[AUTH SUCCESS] Account registered & logged in automatically: ${username} (ID: ${newUserId})`);
 
                 return res.status(201).json({
                     success: true,
@@ -562,14 +610,6 @@ app.post("/api/register", async (req, res) => {
         });
     } catch (error) {
         console.error("[REGISTER ERROR]", error);
-
-        if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
-            return res.status(409).json({
-                success: false,
-                message: "That username or email is already registered."
-            });
-        }
-
         return res.status(500).json({
             success: false,
             message: "Registration failed. Please try again."
@@ -586,7 +626,10 @@ app.post("/api/login", async (req, res) => {
         const identifier = String(req.body.identifier || "").trim();
         const password = String(req.body.password || "");
 
+        console.log(`[LOGIN ATTEMPT] Identifier: ${identifier}`);
+
         if (!identifier || !password) {
+            console.log("[LOGIN BLOCKED] Missing identifier or password.");
             return res.status(400).json({
                 success: false,
                 message: "Please enter your username/email and password."
@@ -600,7 +643,7 @@ app.post("/api/login", async (req, res) => {
         `).get(identifier, identifier);
 
         if (!user || !user.password) {
-            console.log(`[AUTH] Failed login attempt for: ${identifier}`);
+            console.log(`[LOGIN FAILED] No matching user found for: ${identifier}`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid username/email or password."
@@ -610,7 +653,7 @@ app.post("/api/login", async (req, res) => {
         const passwordMatches = await bcrypt.compare(password, user.password);
 
         if (!passwordMatches) {
-            console.log(`[AUTH] Failed login attempt for: ${identifier}`);
+            console.log(`[LOGIN FAILED] Password mismatch for user: ${user.username}`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid username/email or password."
@@ -619,7 +662,7 @@ app.post("/api/login", async (req, res) => {
 
         req.session.regenerate((sessionError) => {
             if (sessionError) {
-                console.error("[SESSION ERROR]", sessionError);
+                console.error("[LOGIN SESSION ERROR]", sessionError);
                 return res.status(500).json({
                     success: false,
                     message: "Unable to create a login session."
@@ -630,7 +673,7 @@ app.post("/api/login", async (req, res) => {
 
             req.session.save((saveError) => {
                 if (saveError) {
-                    console.error("[SESSION SAVE ERROR]", saveError);
+                    console.error("[LOGIN SESSION SAVE ERROR]", saveError);
                     return res.status(500).json({
                         success: false,
                         message: "Unable to save your login session."
@@ -642,7 +685,7 @@ app.post("/api/login", async (req, res) => {
                     FROM users WHERE id = ?
                 `).get(user.id);
 
-                console.log(`[AUTH] Login successful: ${user.username} (User ID: ${user.id})`);
+                console.log(`[LOGIN SUCCESS] User authenticated: ${user.username} (ID: ${user.id}) | Session ID: ${req.session.id.substring(0, 8)}...`);
 
                 return res.json({
                     success: true,
@@ -666,7 +709,10 @@ app.post("/api/login", async (req, res) => {
 // =====================================================
 
 app.post("/api/logout", (req, res) => {
-    const username = getAuthenticatedUser(req)?.username || "Unknown user";
+    const user = getAuthenticatedUser(req);
+    const username = user ? user.username : "Unknown user";
+
+    console.log(`[LOGOUT REQUEST] User: ${username}`);
 
     req.session.destroy((error) => {
         if (error) {
@@ -683,7 +729,7 @@ app.post("/api/logout", (req, res) => {
             sameSite: "none"
         });
 
-        console.log(`[AUTH] Logged out: ${username}`);
+        console.log(`[LOGOUT SUCCESS] Session destroyed for: ${username}`);
 
         return res.json({
             success: true,
@@ -701,6 +747,7 @@ app.get("/api/profile", (req, res) => {
         const user = getAuthenticatedUser(req);
 
         if (!user) {
+            console.log("[PROFILE REQUEST DENIED] No active session found.");
             return res.status(401).json({
                 success: false,
                 message: "Please log in to view your profile."
@@ -708,7 +755,7 @@ app.get("/api/profile", (req, res) => {
         }
 
         const stats = getProfileStats(user);
-        console.log(`[PROFILE] Retrieved profile for ${user.username}`);
+        console.log(`[PROFILE SUCCESS] Retrieved profile data for user: ${user.username}`);
 
         return res.json({
             success: true,
@@ -735,6 +782,8 @@ app.put("/api/profile", requireLogin, (req, res) => {
         const email = String(req.body.email || "").trim().toLowerCase();
         const phone = String(req.body.phone || "").trim();
         const address = String(req.body.address || "").trim();
+
+        console.log(`[PROFILE UPDATE] User ID ${req.authenticatedUser.id} trying to update details.`);
 
         if (!fullname || !username || !email) {
             return res.status(400).json({
@@ -783,7 +832,7 @@ app.put("/api/profile", requireLogin, (req, res) => {
             FROM users WHERE id = ?
         `).get(req.authenticatedUser.id);
 
-        console.log(`[PROFILE] Updated profile for ${updatedUser.username}`);
+        console.log(`[PROFILE UPDATE SUCCESS] User ID ${updatedUser.id} updated profile successfully.`);
 
         return res.json({
             success: true,
@@ -810,6 +859,8 @@ app.post("/api/contact", (req, res) => {
         const email = String(req.body.email || "").trim().toLowerCase();
         const message = String(req.body.message || "").trim();
 
+        console.log(`[CONTACT FORM] Received message from: ${name} (${email})`);
+
         if (!name || !email || !message) {
             return res.status(400).json({
                 success: false,
@@ -828,7 +879,7 @@ app.post("/api/contact", (req, res) => {
             INSERT INTO contacts (name, email, message) VALUES (?, ?, ?)
         `).run(name, email, message);
 
-        console.log(`[CONTACT] New message received from ${email}`);
+        console.log(`[CONTACT SAVED] Message ID: ${result.lastInsertRowid} stored in database.`);
 
         return res.status(201).json({
             success: true,
@@ -858,6 +909,8 @@ app.post("/api/orders", (req, res) => {
         const paymentMethod = String(req.body.payment_method || "").trim();
         const specialInstructions = String(req.body.special_instructions || "").trim();
         const totalAmount = Number(req.body.total_amount ?? req.body.totalAmount ?? 0);
+
+        console.log(`[ORDER SUBMISSION] Customer: ${fullname} (${email}) | Total Amount: ₱${totalAmount}`);
 
         if (!fullname || !email || !phone || !address) {
             return res.status(400).json({
@@ -895,7 +948,7 @@ app.post("/api/orders", (req, res) => {
             totalAmount, "Pending"
         );
 
-        console.log(`[ORDER] Created ${orderNumber} for ${email} | Total: ${totalAmount}`);
+        console.log(`[ORDER CREATED] Order #${orderNumber} saved successfully (ID: ${result.lastInsertRowid}).`);
 
         return res.status(201).json({
             success: true,
@@ -928,6 +981,8 @@ app.get("/api/wishlist/count", requireLogin, (req, res) => {
             SELECT COUNT(*) AS count FROM wishlist WHERE user_id = ?
         `).get(req.authenticatedUser.id);
 
+        console.log(`[WISHLIST COUNT] User ${req.authenticatedUser.username} has ${result.count} item(s).`);
+
         return res.json({
             success: true,
             count: result.count,
@@ -956,7 +1011,7 @@ app.get("/api/wishlist", requireLogin, (req, res) => {
             ORDER BY w.id DESC
         `).all(req.authenticatedUser.id);
 
-        console.log(`[WISHLIST] Retrieved ${products.length} item(s) for ${req.authenticatedUser.username}`);
+        console.log(`[WISHLIST FETCH] Retrieved ${products.length} item(s) for user ${req.authenticatedUser.username}`);
 
         return res.json({
             success: true,
@@ -980,6 +1035,7 @@ app.get("/api/wishlist", requireLogin, (req, res) => {
 app.post("/api/wishlist", requireLogin, (req, res) => {
     try {
         const productId = Number(req.body.product_id ?? req.body.productId ?? req.body.id);
+        console.log(`[WISHLIST ADD] User ${req.authenticatedUser.username} requested product ID: ${productId}`);
 
         if (!Number.isInteger(productId) || productId <= 0) {
             return res.status(400).json({
@@ -1001,6 +1057,7 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
         `).get(req.authenticatedUser.id, productId);
 
         if (existingItem) {
+            console.log(`[WISHLIST INFO] Product ${productId} is already in wishlist for ${req.authenticatedUser.username}`);
             return res.json({
                 success: true,
                 message: "This product is already in your wishlist."
@@ -1011,7 +1068,7 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
             INSERT INTO wishlist (user_id, product_id) VALUES (?, ?)
         `).run(req.authenticatedUser.id, productId);
 
-        console.log(`[WISHLIST] Product ${productId} added for ${req.authenticatedUser.username}`);
+        console.log(`[WISHLIST SUCCESS] Product ${productId} added for user ${req.authenticatedUser.username}`);
 
         return res.status(201).json({
             success: true,
@@ -1033,6 +1090,7 @@ app.post("/api/wishlist", requireLogin, (req, res) => {
 app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
     try {
         const productId = Number(req.params.product_id);
+        console.log(`[WISHLIST REMOVE] User ${req.authenticatedUser.username} removing product ID: ${productId}`);
 
         if (!Number.isInteger(productId) || productId <= 0) {
             return res.status(400).json({
@@ -1052,7 +1110,7 @@ app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
             });
         }
 
-        console.log(`[WISHLIST] Product ${productId} removed for ${req.authenticatedUser.username}`);
+        console.log(`[WISHLIST REMOVE SUCCESS] Product ${productId} removed for user ${req.authenticatedUser.username}`);
 
         return res.json({
             success: true,
@@ -1072,7 +1130,7 @@ app.delete("/api/wishlist/:product_id", requireLogin, (req, res) => {
 // =====================================================
 
 app.use("/api", (req, res) => {
-    console.log(`[API 404] ${req.method} ${req.originalUrl}`);
+    console.log(`[API 404 WARNING] Endpoint not found: ${req.method} ${req.originalUrl}`);
     return res.status(404).json({
         success: false,
         message: "API endpoint not found."
@@ -1084,7 +1142,7 @@ app.use("/api", (req, res) => {
 // =====================================================
 
 app.use((error, req, res, next) => {
-    console.error("[SERVER ERROR]", error.message);
+    console.error("[SERVER ERROR CAUGHT]", error.message);
 
     if (res.headersSent) return next(error);
 
@@ -1110,12 +1168,11 @@ const server = app.listen(PORT, () => {
     console.log("============================================");
     console.log("       A&K CRAFTS BACKEND SERVER");
     console.log("============================================");
-    console.log(`[SERVER] Running at http://localhost:${PORT}`);
-    console.log(`[SERVER] API: http://localhost:${PORT}/api`);
-    console.log(`[SERVER] Products: http://localhost:${PORT}/api/products`);
-    console.log(`[SERVER] Database: ${dbPath}`);
-    console.log(`[SERVER] Session database: ${sessionDbPath}`);
-    console.log("[SERVER] Ready to accept requests.");
+    console.log(`[SERVER STATUS] Running and listening on port ${PORT}`);
+    console.log(`[API BASE] http://localhost:${PORT}/api`);
+    console.log(`[DATABASE FILE] ${dbPath}`);
+    console.log(`[SESSION DB] ${sessionDbPath}`);
+    console.log("[SERVER READY] All logging hooks active. Waiting for traffic...");
     console.log("============================================");
     console.log("");
 });
@@ -1124,7 +1181,7 @@ server.on("error", (error) => {
     console.error("[SERVER STARTUP ERROR]", error.message);
 
     if (error.code === "EADDRINUSE") {
-        console.error(`[SERVER] Port ${PORT} is already in use. Stop the other server or choose another port.`);
+        console.error(`[SERVER ERROR] Port ${PORT} is already in use. Please terminate other running node instances.`);
     }
 });
 
@@ -1138,25 +1195,25 @@ function shutdown() {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    console.log("\n[SERVER] Shutting down...");
+    console.log("\n[SHUTDOWN INITIATED] Closing database connections and server...");
 
     server.close(() => {
         try {
             db.close();
-            console.log("[DATABASE] Connection closed.");
+            console.log("[DATABASE CLOSED] SQLite main connection safely shut down.");
 
             sessionDb.close();
-            console.log("[SESSION DATABASE] Connection closed.");
+            console.log("[SESSION DATABASE CLOSED] SQLite session store safely shut down.");
 
             process.exit(0);
         } catch (error) {
-            console.error("[DATABASE CLOSE ERROR]", error);
+            console.error("[SHUTDOWN ERROR]", error);
             process.exit(1);
         }
     });
 
     setTimeout(() => {
-        console.error("[SERVER] Forced shutdown after timeout.");
+        console.error("[FORCED SHUTDOWN] Timeout reached. Exiting immediately.");
         process.exit(1);
     }, 10000).unref();
 }
