@@ -19,7 +19,8 @@ const allowedOrigins = [
     "http://localhost:5500",
     "http://127.0.0.1:5500",
     "http://localhost:3000",
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
+    "https://regal-pavlova-823257.netlify.app" // <-- Added your live Netlify frontend URL
 ];
 
 app.use(cors({
@@ -151,8 +152,8 @@ app.use(session({
     rolling: true,
     cookie: {
         httpOnly: true,
-        secure: false,
-        sameSite: "lax",
+        secure: true,   // Required for cross-site HTTPS requests (Netlify -> Render)
+        sameSite: "none", // Required for cross-site cookies
         maxAge: 7 * 24 * 60 * 60 * 1000
     }
 }));
@@ -678,8 +679,8 @@ app.post("/api/logout", (req, res) => {
 
         res.clearCookie("akcrafts.sid", {
             httpOnly: true,
-            secure: false,
-            sameSite: "lax"
+            secure: true,
+            sameSite: "none"
         });
 
         console.log(`[AUTH] Logged out: ${username}`);
