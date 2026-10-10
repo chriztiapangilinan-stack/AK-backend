@@ -378,12 +378,32 @@ function requireLogin(req, res, next) {
     next();
 }
 
-// Request Logger Middleware
+// =====================================================
+// ENHANCED REQUEST & ACTIVITY LOGGER MIDDLEWARE
+// =====================================================
 app.use((req, res, next) => {
     const startedAt = Date.now();
+
+    console.log("\n--------------------------------------------------");
+    console.log(`[INCOMING] ${req.method} ${req.originalUrl}`);
+    console.log(`[IP] ${req.ip || req.socket.remoteAddress}`);
+    
+    if (Object.keys(req.query || {}).length > 0) {
+        console.log(`[QUERY PARAMS]`, JSON.stringify(req.query, null, 2));
+    }
+    
+    if (req.body && Object.keys(req.body).length > 0) {
+        const safeBody = { ...req.body };
+        if (safeBody.password) safeBody.password = "[MASKED]";
+        console.log(`[BODY PAYLOAD]`, JSON.stringify(safeBody, null, 2));
+    }
+
     res.on("finish", () => {
-        console.log(`[REQUEST] ${req.method} ${req.originalUrl} | ${res.statusCode} | ${Date.now() - startedAt}ms`);
+        const duration = Date.now() - startedAt;
+        console.log(`[RESPONSE] ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms`);
+        console.log("--------------------------------------------------");
     });
+
     next();
 });
 
@@ -439,6 +459,7 @@ app.get("/api/products", (req, res) => {
 
         sql += " ORDER BY id DESC";
 
+        console.log(`[DATABASE QUERY] Executing SQL: ${sql} with params:`, params);
         const products = db.prepare(sql).all(...params);
 
         console.log(`[PRODUCTS] Retrieved ${products.length} product(s).`);
